@@ -1,5 +1,5 @@
 {application, gtask,
- [{description, "An OTP library"},
+ [{description, "An OTP library for parallel tasks"},
   {vsn, "0.1.0"},
   {registered, []},
   {applications,
