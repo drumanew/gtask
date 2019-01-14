@@ -7,7 +7,7 @@
          delete/1]).
 
 -type group()  :: atom().
--type task()   :: fun(() -> any()).
+-type task()   :: fun(() -> any()) | {module(), fun(), list(any())}.
 -type error()  :: {error, Reason :: term()}.
 -type result() :: [any()].
 
@@ -35,6 +35,13 @@ new(Group) when is_atom(Group) ->
 new(_) ->
     {error, badarg}.
 
+add(Group, Task = {M, F, A}) when is_atom(Group) ->
+    case check_mfa(M, F, A) of
+        true ->
+            ?noproc(gen_server:call(Group, {add, Task}));
+        false ->
+            {error, badarg}
+    end;
 add(Group, Task) when is_atom(Group) andalso is_function(Task, 0) ->
     ?noproc(gen_server:call(Group, {add, Task}));
 add(_, _) ->
@@ -53,3 +60,8 @@ delete(_) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+check_mfa(M, F, A) ->
+    is_atom(M) andalso
+    is_list(A) andalso
+    erlang:function_exported(M, F, length(A)).

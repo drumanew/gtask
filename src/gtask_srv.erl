@@ -107,7 +107,7 @@ spawn_task(Ref, Task) ->
                     timer:sleep(?TASK_TIMEOUT),
                     exit({report, {Ref, Pid, timeout}})
                 end),
-            try Task() of
+            try execute(Task) of
                 Result ->
                     exit({report, {Ref, self(), {done, Result}}})
             catch
@@ -117,3 +117,8 @@ spawn_task(Ref, Task) ->
                     exit({report, {Ref, self(), {fail, {Class, Error}}}})
             end
         end).
+
+execute({M, F, A}) ->
+    erlang:apply(M, F, A);
+execute(Fun) when is_function(Fun, 0) ->
+    Fun().
