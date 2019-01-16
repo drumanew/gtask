@@ -1,7 +1,7 @@
 -module(gtask_srv).
 -behaviour(gen_server).
 
--export([start_link/1]).
+-export([start_link/2]).
 
 -export([init/1,
          handle_call/3,
@@ -15,15 +15,22 @@
 
 %% API
 
-start_link(Name) ->
-    gen_server:start_link({local, Name}, ?MODULE, [], []).
+start_link(Name, Opts) ->
+    gen_server:start_link({local, Name}, ?MODULE, Opts, []).
 
 %% gen_server callbacks
 
-init(_Args) ->
+init(Opts) ->
     process_flag(trap_exit, true),
     T = ets:new(undefined, [{keypos, #entry.ref}, protected, set]),
-    {ok, #{ tab => T, reply_to => [], count => 0, values => [] }}.
+    State0 = #{ tab => T,
+                reply_to => [],
+                count => 0,
+                values => [],
+                queue => queue:new(),
+                q_len => 0 },
+    State = maps:merge(State0, Opts),
+    {ok, State}.
 
 handle_call({add, Task}, _From, State0) ->
     {Reply, State} = do_add(Task, State0),
@@ -48,7 +55,14 @@ terminate(_Reason, _State) ->
 
 %% private
 
+do_add(Task, State = #{ count := Count,
+                        max_workers := Max,
+                        queue := Q,
+                        q_len := L }) when Count >= Max ->
+    % io:format(user, "enqueue task, state: ~P~n", [State, 5]),
+    {ok, State#{ queue => queue:in(Task, Q), q_len => L + 1 }};
 do_add(Task, State = #{ tab := T, count := Count }) ->
+    % io:format(user, "start task, state: ~P~n", [State, 5]),
     Ref = erlang:make_ref(),
     Pid = spawn_task(Ref, Task),
     Entry = #entry{ ref = Ref, pid = Pid },
@@ -71,16 +85,21 @@ handle_report(_Report, State = #{ count := C }) when C == 0 ->
     %% BUG! report not expected!
     error_logger:error_msg("report not expected: ~p~n", [_Report]),
     {ok, State};
-handle_report({Ref, Pid, Result}, State0 = #{ tab := T, values := V, count := C }) ->
+handle_report({Ref, Pid, Result}, State0 = #{ tab := T,
+                                              values := V,
+                                              count := C }) ->
     Entries = ets:lookup(T, Ref),
     case Entries of
         [#entry{ ref = Ref, pid = Pid }] ->
             ets:delete(T, Ref),
-            State = State0#{ values => [Result | V], count => C - 1 },
-            maybe_reply(State);
+            State1 = State0#{ values => [Result | V], count => C - 1 },
+            {ok, State2} = maybe_reply(State1),
+            % io:format(user, "task ended, state: ~P~n", [State2, 5]),
+            maybe_pop_queue(State2);
         [] ->
             %% BUG! no entries for report
-            error_logger:error_msg("no entries for report: ~p~n", [{Ref, Pid, Result}]),
+            error_logger:error_msg("no entries for report: ~p~n",
+                                   [{Ref, Pid, Result}]),
             {ok, State0}
     end.
 
@@ -91,11 +110,23 @@ handle_unexpected([#entry{}], _Reason, _State) ->
     error_logger:error_msg("dont even want to handle it~n", []),
     exit(kill).
 
-maybe_reply(State = #{ reply_to := ReplyTo, values := V, count := 0 }) when ReplyTo /= [] ->
+maybe_reply(State = #{ reply_to := ReplyTo,
+                       values := V,
+                       count := 0,
+                       q_len := 0 }) when ReplyTo /= [] ->
     [ gen_server:reply(From, {ok, V}) || From <- ReplyTo ],
     {ok, State#{ reply_to := [], values := [] }};
 maybe_reply(State) ->
     {ok, State}.
+
+maybe_pop_queue(State = #{ q_len := 0 }) ->
+    % io:format(user, "queue empty, state: ~P~n", [State, 5]),
+    {ok, State};
+maybe_pop_queue(State0 = #{ queue := Q0, q_len := QLen0 }) ->
+    {{value, Task}, Q1} = queue:out(Q0),
+    QLen1 = QLen0 - 1,
+    % io:format(user, "pop from queue, state: ~P~n", [State0, 5]),
+    do_add(Task, State0#{ queue => Q1, q_len => QLen1 }).
 
 spawn_task(Ref, Task) ->
     erlang:spawn_link(

@@ -1,10 +1,10 @@
 -module (gtask_SUITE).
 
 -export ([all/0]).
--export ([mod_exists/1, simple/1]).
+-export ([mod_exists/1, simple/1, flow_control/1]).
 
 all() ->
-    [mod_exists, simple].
+    [mod_exists, simple, flow_control].
 
 mod_exists(_) ->
     {module, gtask} = code:load_file(gtask).
@@ -116,6 +116,36 @@ simple(_) ->
     ok = gtask:delete(a),
     ok = gtask:delete(b),
     ok = gtask:delete(c),
+
+    ok.
+
+flow_control(_) ->
+    Group = flow_control_test,
+
+    %% create group
+    ok = gtask:new(Group, #{ max_workers => 10 }),
+
+    %% add 100 tasks with 2sec delays
+    [ ok = gtask:add(Group, fun () -> timer:sleep(2000) end) || _ <- lists:seq(1, 50) ],
+
+    %% check queue size
+    40 = maps:get(q_len, sys:get_state(Group)),
+    timer:sleep(2000),
+
+    30 = maps:get(q_len, sys:get_state(Group)),
+    timer:sleep(2000),
+
+    20 = maps:get(q_len, sys:get_state(Group)),
+    timer:sleep(2000),
+
+    10 = maps:get(q_len, sys:get_state(Group)),
+    timer:sleep(2000),
+
+    {ok, R} = gtask:await(Group),
+
+    R = lists:duplicate(50, {done, ok}),
+
+    ok = gtask:delete(Group),
 
     ok.
 

@@ -15,6 +15,7 @@ api_test_() ->
   [?_assertEqual(ok, gtask:new(Grp)),
    ?_assertMatch({error, _}, gtask:new(Grp)),
    ?_assertMatch({error, _}, gtask:new(BadGrp)),
+   ?_assertMatch({error, _}, gtask:new(Grp, #{ max_workers => -1 })),
    ?_assertEqual(ok, gtask:add(Grp, TskA)),
    ?_assertEqual(ok, gtask:add(Grp, TskB)),
    ?_assertMatch({error, _}, gtask:add(Grp, TskC)),

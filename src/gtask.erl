@@ -2,16 +2,19 @@
 
 %% API exports
 -export([new/1,
+         new/2,
          add/2,
          await/1,
          delete/1]).
 
 -type group()  :: atom().
+-type opts()   :: #{ max_workers := pos_integer() }.
 -type task()   :: fun(() -> any()) | {module(), fun(), list(any())}.
 -type error()  :: {error, Reason :: term()}.
 -type result() :: [any()].
 
 -spec new(group()) -> ok | error().
+-spec new(group(), opts()) -> ok | error().
 -spec add(group(), task()) -> ok | error().
 -spec await(group()) -> {ok, result()} | error().
 -spec delete(group()) -> ok | error().
@@ -27,12 +30,21 @@
 %% API functions
 %%====================================================================
 
-new(Group) when is_atom(Group) ->
-    case gtask_srv:start_link(Group) of
-        {ok, _Pid} -> ok;
-        {error, _} = Error -> Error
+new(Group) ->
+  new(Group, default_opts()).
+
+new(Group, Opts0) when is_atom(Group) andalso is_map(Opts0) ->
+    Opts = maps:merge(default_opts(), Opts0),
+    case check_opts(Opts) of
+        true ->
+            case gtask_srv:start_link(Group, Opts) of
+                {ok, _Pid} -> ok;
+                {error, _} = Error -> Error
+            end;
+        _ ->
+            {error, badarg}
     end;
-new(_) ->
+new(_, _) ->
     {error, badarg}.
 
 add(Group, Task = {M, F, A}) when is_atom(Group) ->
@@ -60,6 +72,15 @@ delete(_) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+default_opts() ->
+    #{ max_workers => 500 }.
+
+check_opts(#{ max_workers := MaxWorkers }) when is_integer(MaxWorkers) andalso
+                                                MaxWorkers > 0 ->
+    true;
+check_opts(_) ->
+    false.
 
 check_mfa(M, F, A) ->
     is_atom(M) andalso
