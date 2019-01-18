@@ -20,6 +20,7 @@ api_test_() ->
    ?_assertEqual(ok, gtask:add(Grp, TskB)),
    ?_assertMatch({error, _}, gtask:add(Grp, TskC)),
    ?_assertMatch({error, _}, gtask:add(BadGrp, TskA)),
+   ?_assertMatch({error, _}, gtask:add(Grp, TskA, #{ timeout => -1 })),
    ?_assertEqual(ok, gtask:add(Grp, TskD)),
    ?_assertMatch({error, _}, gtask:add(Grp, TskE)),
    ?_assertMatch({ok, L} when is_list(L) andalso length(L) == 3,

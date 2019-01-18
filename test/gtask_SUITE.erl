@@ -1,10 +1,18 @@
 -module (gtask_SUITE).
 
 -export ([all/0]).
--export ([mod_exists/1, simple/1, flow_control/1]).
+-export ([ mod_exists/1
+         , simple/1
+         , flow_control/1
+         , task_timeout/1
+         ]).
 
 all() ->
-    [mod_exists, simple, flow_control].
+    [ mod_exists
+    , simple
+    , flow_control
+    , task_timeout
+    ].
 
 mod_exists(_) ->
     {module, gtask} = code:load_file(gtask).
@@ -126,7 +134,8 @@ flow_control(_) ->
     ok = gtask:new(Group, #{ max_workers => 10 }),
 
     %% add 50 tasks with 2sec delays
-    [ ok = gtask:add(Group, fun () -> timer:sleep(2000) end) || _ <- lists:seq(1, 50) ],
+    [ ok = gtask:add(Group, fun () -> timer:sleep(2000) end)
+      || _ <- lists:seq(1, 50) ],
 
     %% check queue size
     40 = maps:get(q_len, sys:get_state(Group)),
@@ -146,12 +155,20 @@ flow_control(_) ->
     R = lists:duplicate(50, {done, ok}),
 
     %% add 20 tasks with 2sec delays
-    [ ok = gtask:add(Group, fun () -> timer:sleep(2000) end) || _ <- lists:seq(1, 20) ],
+    [ ok = gtask:add(Group, fun () -> timer:sleep(2000) end)
+      || _ <- lists:seq(1, 20) ],
 
     {error, timeout} = gtask:await(Group, 2000),
 
     ok = gtask:delete(Group),
 
+    ok.
+
+task_timeout(_) ->
+    Group = task_timeout_test,
+    ok = gtask:new(Group),
+    ok = gtask:add(Group, fun () -> timer:sleep(1000) end, #{ timeout => 500 }),
+    {ok, [timeout]} = gtask:await(Group),
     ok.
 
 %% private

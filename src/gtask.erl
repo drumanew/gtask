@@ -4,29 +4,35 @@
 -export([new/1,
          new/2,
          add/2,
+         add/3,
          await/1,
          await/2,
          delete/1]).
 
--type group()  :: atom().
--type opts()   :: #{ max_workers := pos_integer() }.
--type task()   :: fun(() -> any()) | {module(), fun(), list(any())}.
--type error()  :: {error, Reason :: term()}.
--type result() :: [any()].
+-type group()       :: atom().
+-type create_opts() :: #{ max_workers := pos_integer() }.
+-type task()        :: fun(() -> any()) | {module(), fun(), list(any())}.
+-type task_opts()   :: #{ timeout := timeout() }.
+-type error()       :: {error, Reason :: term()}.
+-type report()      :: {done, any()} | timeout | {fail, Reason :: term()}.
+-type reports()     :: list(report()).
 
 -spec new(group()) -> ok | error().
--spec new(group(), opts()) -> ok | error().
+-spec new(group(), create_opts()) -> ok | error().
 -spec add(group(), task()) -> ok | error().
--spec await(group()) -> {ok, result()} | error().
+-spec add(group(), task(), task_opts()) -> ok | error().
+-spec await(group()) -> {ok, reports()} | error().
 -spec delete(group()) -> ok | error().
 
 -define(is_timeout(T), ((T == infinity) orelse (is_integer(T) andalso T >= 0))).
 
--define(DEFAULT_TIMEOUT, 30000).
+-define(DEFAULT_AWAIT_TIMEOUT, 30000).
+-define(DEFAULT_MAX_WORKERS,  100).
+-define(DEFAULT_TASK_TIMEOUT, 15000).
 
 -define(catchsome(Expr),
         case catch Expr of
-             ok -> ok;
+            ok -> ok;
             {ok, _} = __Rep -> __Rep;
             {'EXIT', noproc} -> {error, not_started};
             {'EXIT', {timeout, _}} -> {error, timeout};
@@ -38,11 +44,11 @@
 %%====================================================================
 
 new(Group) ->
-  new(Group, default_opts()).
+    new(Group, default_opts(create)).
 
 new(Group, Opts0) when is_atom(Group) andalso is_map(Opts0) ->
-    Opts = maps:merge(default_opts(), Opts0),
-    case check_opts(Opts) of
+    Opts = maps:merge(default_opts(create), Opts0),
+    case check_opts(create, Opts) of
         true ->
             case gtask_srv:start_link(Group, Opts) of
                 {ok, _Pid} -> ok;
@@ -54,20 +60,27 @@ new(Group, Opts0) when is_atom(Group) andalso is_map(Opts0) ->
 new(_, _) ->
     {error, badarg}.
 
-add(Group, Task = {M, F, A}) when is_atom(Group) ->
-    case check_mfa(M, F, A) of
+add(Group, Task) ->
+    add(Group, Task, default_opts(task)).
+
+add(Group, Task, Opts0) when is_atom(Group) andalso is_map(Opts0) ->
+    case check_task(Task) of
         true ->
-            ?catchsome(gen_server:call(Group, {add, Task}));
-        false ->
+            Opts = maps:merge(default_opts(task), Opts0),
+            case check_opts(task, Opts) of
+                true ->
+                    ?catchsome(gen_server:call(Group, {add, Task, Opts}));
+                false ->
+                    {error, badarg}
+            end;
+        _ ->
             {error, badarg}
     end;
-add(Group, Task) when is_atom(Group) andalso is_function(Task, 0) ->
-    ?catchsome(gen_server:call(Group, {add, Task}));
-add(_, _) ->
+add(_, _, _) ->
     {error, badarg}.
 
 await(Group) ->
-    await(Group, ?DEFAULT_TIMEOUT).
+    await(Group, ?DEFAULT_AWAIT_TIMEOUT).
 
 await(Group, Timeout) when is_atom(Group) andalso ?is_timeout(Timeout) ->
     ?catchsome(gen_server:call(Group, await, Timeout));
@@ -83,16 +96,21 @@ delete(_) ->
 %% Internal functions
 %%====================================================================
 
-default_opts() ->
-    #{ max_workers => 500 }.
+default_opts(create) ->
+    #{ max_workers => ?DEFAULT_MAX_WORKERS };
+default_opts(task) ->
+    #{ timeout => ?DEFAULT_TASK_TIMEOUT }.
 
-check_opts(#{ max_workers := MaxWorkers }) when is_integer(MaxWorkers) andalso
-                                                MaxWorkers > 0 ->
-    true;
-check_opts(_) ->
+check_opts(create, #{ max_workers := MaxWorkers }) ->
+    is_integer(MaxWorkers) andalso MaxWorkers > 0;
+check_opts(task, #{ timeout := Timeout }) ->
+    ?is_timeout(Timeout);
+check_opts(_, _) ->
     false.
 
-check_mfa(M, F, A) ->
+check_task({M, F, A}) ->
     is_atom(M) andalso
     is_list(A) andalso
-    erlang:function_exported(M, F, length(A)).
+    erlang:function_exported(M, F, length(A));
+check_task(Task) ->
+    is_function(Task, 0).

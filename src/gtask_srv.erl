@@ -11,8 +11,6 @@
 
 -record (entry, {ref, pid}).
 
--define (TASK_TIMEOUT, 15000).
-
 %% API
 
 start_link(Name, Opts) ->
@@ -32,8 +30,8 @@ init(Opts) ->
     State = maps:merge(State0, Opts),
     {ok, State}.
 
-handle_call({add, Task}, _From, State0) ->
-    {Reply, State} = do_add(Task, State0),
+handle_call({add, Task, Opts}, _From, State0) ->
+    {Reply, State} = do_add(Task, Opts, State0),
     {reply, Reply, State};
 handle_call(await, From, State0) ->
     {ok, State} = do_await(From, State0),
@@ -55,16 +53,14 @@ terminate(_Reason, _State) ->
 
 %% private
 
-do_add(Task, State = #{ count := Count,
-                        max_workers := Max,
-                        queue := Q,
-                        q_len := L }) when Count >= Max ->
-    % io:format(user, "enqueue task, state: ~P~n", [State, 5]),
-    {ok, State#{ queue => queue:in(Task, Q), q_len => L + 1 }};
-do_add(Task, State = #{ tab := T, count := Count }) ->
-    % io:format(user, "start task, state: ~P~n", [State, 5]),
+do_add(Task, Opts, State = #{ count := Count,
+                              max_workers := Max,
+                              queue := Q,
+                              q_len := L }) when Count >= Max ->
+    {ok, State#{ queue => queue:in({Task, Opts}, Q), q_len => L + 1 }};
+do_add(Task, Opts, State = #{ tab := T, count := Count }) ->
     Ref = erlang:make_ref(),
-    Pid = spawn_task(Ref, Task),
+    Pid = spawn_task(Ref, Task, Opts),
     Entry = #entry{ ref = Ref, pid = Pid },
     ets:insert(T, Entry),
     {ok, State#{ count => Count + 1 }}.
@@ -94,7 +90,6 @@ handle_report({Ref, Pid, Result}, State0 = #{ tab := T,
             ets:delete(T, Ref),
             State1 = State0#{ values => [Result | V], count => C - 1 },
             {ok, State2} = maybe_reply(State1),
-            % io:format(user, "task ended, state: ~P~n", [State2, 5]),
             maybe_pop_queue(State2);
         [] ->
             %% BUG! no entries for report
@@ -120,22 +115,20 @@ maybe_reply(State) ->
     {ok, State}.
 
 maybe_pop_queue(State = #{ q_len := 0 }) ->
-    % io:format(user, "queue empty, state: ~P~n", [State, 5]),
     {ok, State};
 maybe_pop_queue(State0 = #{ queue := Q0, q_len := QLen0 }) ->
-    {{value, Task}, Q1} = queue:out(Q0),
+    {{value, {Task, Opts}}, Q1} = queue:out(Q0),
     QLen1 = QLen0 - 1,
-    % io:format(user, "pop from queue, state: ~P~n", [State0, 5]),
-    do_add(Task, State0#{ queue => Q1, q_len => QLen1 }).
+    do_add(Task, Opts, State0#{ queue => Q1, q_len => QLen1 }).
 
-spawn_task(Ref, Task) ->
+spawn_task(Ref, Task, #{ timeout := Timeout }) ->
     erlang:spawn_link(
         fun () ->
             Pid = self(),
             %% Spawn killer with no link, no need to monitor him
             erlang:spawn_link(
                 fun () ->
-                    timer:sleep(?TASK_TIMEOUT),
+                    timer:sleep(Timeout),
                     exit({report, {Ref, Pid, timeout}})
                 end),
             try execute(Task) of
@@ -144,8 +137,8 @@ spawn_task(Ref, Task) ->
             catch
                 exit:{report, _} = Report ->
                     exit(Report);
-                Class:Error ->
-                    exit({report, {Ref, self(), {fail, {Class, Error}}}})
+                _Class:Error ->
+                    exit({report, {Ref, self(), {fail, Error}}})
             end
         end).
 
