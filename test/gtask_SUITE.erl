@@ -8,6 +8,7 @@
          , simple/1
          , flow_control/1
          , task_timeout/1
+         , task_expiration/1
          ]).
 
 all() ->
@@ -15,6 +16,7 @@ all() ->
     , simple
     , flow_control
     , task_timeout
+    , task_expiration
     ].
 
 init_per_testcase(_Test, Config) ->
@@ -181,6 +183,19 @@ task_timeout(_) ->
     ok = gtask:new(Group),
     ok = gtask:add(Group, fun () -> timer:sleep(2000) end, #{ timeout => 1 }),
     {ok, [timeout]} = gtask:await(Group),
+    ok.
+
+task_expiration(_) ->
+    Group = task_expiration_test,
+    ok = gtask:new(Group, #{ max_workers => 5 }),
+    [ ok = gtask:add(Group, fun () -> timer:sleep(5000) end)
+      || _ <- lists:seq(1, 5) ],
+    [ ok = gtask:add(Group, task("must expire"), #{ expire => 4 })
+      || _ <- lists:seq(1, 5) ],
+    {ok, R0} = gtask:await(Group),
+    R1 = lists:sort(lists:flatten(lists:duplicate(5, {done, ok}),
+                                  lists:duplicate(5, expired))),
+    R1 = lists:sort(R0),
     ok.
 
 %% private

@@ -16,7 +16,7 @@
 %% API
 
 start_link(Name, Opts) ->
-    gen_server:start_link({via, syn, Name}, ?MODULE, Opts, []).
+    gen_server:start_link({via, syn, Name}, ?MODULE, Opts#{ name => Name }, []).
 
 %% gen_server callbacks
 
@@ -60,12 +60,9 @@ do_add(Task, Opts, State = #{ count := Count,
                               queue := Q,
                               q_len := L }) when Count >= Max ->
     {ok, State#{ queue => queue:in({Task, Opts}, Q), q_len => L + 1 }};
-do_add(Task, Opts, State = #{ tab := T, count := Count }) ->
-    Ref = erlang:make_ref(),
-    Pid = spawn_task(Ref, Task, Opts),
-    Entry = #entry{ ref = Ref, pid = Pid },
-    ets:insert(T, Entry),
-    {ok, State#{ count => Count + 1 }}.
+do_add(Task, Opts, State) ->
+    Now = erlang:monotonic_time(second),
+    maybe_expired(Task, Opts, Now, State).
 
 do_await(From, State0 = #{ reply_to := ReplyTo }) ->
     State = State0#{ reply_to => [From | ReplyTo] },
@@ -107,11 +104,25 @@ handle_unexpected([#entry{}], _Reason, _State) ->
     error_logger:error_msg("dont even want to handle it~n", []),
     exit(kill).
 
+maybe_expired(_Task, #{ expire := Time }, Now, State0 = #{ values := V })
+    when Now > Time ->
+    error_logger:info_msg("group: ~p: task ~p expired~n",
+                          [maps:get(name, State0), _Task]),
+    State = State0#{ values => [ expired | V ] },
+    maybe_reply(State);
+maybe_expired(Task, Opts, _, State = #{ tab := T, count := Count }) ->
+    Ref = erlang:make_ref(),
+    Pid = spawn_task(Ref, Task, Opts),
+    Entry = #entry{ ref = Ref, pid = Pid },
+    ets:insert(T, Entry),
+    {ok, State#{ count => Count + 1 }}.
+
 maybe_reply(State = #{ reply_to := ReplyTo,
-                       values := V,
+                       values := Values0,
                        count := 0,
                        q_len := 0 }) when ReplyTo /= [] ->
-    [ gen_server:reply(From, {ok, V}) || From <- ReplyTo ],
+    Values = lists:reverse(Values0),
+    [ gen_server:reply(From, {ok, Values}) || From <- ReplyTo ],
     {ok, State#{ reply_to := [], values := [] }};
 maybe_reply(State) ->
     {ok, State}.

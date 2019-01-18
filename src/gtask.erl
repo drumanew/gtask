@@ -12,9 +12,11 @@
 -type group()       :: any().
 -type create_opts() :: #{ max_workers := pos_integer() }.
 -type task()        :: fun(() -> any()) | {module(), fun(), list(any())}.
--type task_opts()   :: #{ timeout := timeout() }.
+-type task_opts()   :: #{ timeout := timeout()
+                        , expire := timeout()
+                        }.
 -type error()       :: {error, Reason :: term()}.
--type report()      :: {done, any()} | timeout | {fail, Reason :: term()}.
+-type report()      :: {done, any()} | timeout | expired | {fail, Reason :: term()}.
 -type reports()     :: list(report()).
 
 -spec new(group()) -> ok | error().
@@ -30,6 +32,7 @@
 -define(DEFAULT_AWAIT_TIMEOUT, 30).
 -define(DEFAULT_MAX_WORKERS,  100).
 -define(DEFAULT_TASK_TIMEOUT, 15).
+-define(DEFAULT_TASK_EXPIRED_IN, infinity).
 
 -define(catchsome(Expr),
         case catch Expr of
@@ -104,7 +107,9 @@ call(Group, Req, Timeout) ->
 default_opts(create) ->
     #{ max_workers => ?DEFAULT_MAX_WORKERS };
 default_opts(task) ->
-    #{ timeout => ?DEFAULT_TASK_TIMEOUT }.
+    #{ timeout => ?DEFAULT_TASK_TIMEOUT
+     , expire => ?DEFAULT_TASK_EXPIRED_IN
+     }.
 
 -define(chopts(Cond),
         case (Cond) of
@@ -114,13 +119,19 @@ default_opts(task) ->
 
 check_opts(Type = create, #{ max_workers := MaxWorkers } = Opts) ->
     ?chopts(is_integer(MaxWorkers) andalso MaxWorkers > 0);
-check_opts(Type = task, #{ timeout := Timeout } = Opts) ->
-    ?chopts(?is_timeout(Timeout)).
+check_opts(Type = task, #{ timeout := Timeout
+                         , expire := Exp
+                         } = Opts) ->
+    ?chopts(?is_timeout(Timeout) andalso ?is_timeout(Exp)).
 
 -undef(chopts).
 
-transform(task, Opts = #{ timeout := TSec }) ->
-    Opts#{ timeout => TSec*1000 };
+transform(task, Opts = #{ timeout := TSec
+                        , expire := Exp
+                        }) ->
+    Opts#{ timeout => TSec*1000
+         , expire => set_expire(Exp)
+         };
 transform(create, Opts) ->
     Opts.
 
@@ -130,3 +141,8 @@ check_task({M, F, A}) ->
     erlang:function_exported(M, F, length(A));
 check_task(Task) ->
     is_function(Task, 0).
+
+set_expire(infinity) ->
+    infinity;
+set_expire(Exp) when is_integer(Exp) ->
+    erlang:monotonic_time(second) + Exp.

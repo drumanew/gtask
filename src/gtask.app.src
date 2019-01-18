@@ -1,6 +1,6 @@
 {application, gtask,
  [{description, "An OTP library for parallel tasks"},
-  {vsn, "0.5.1"},
+  {vsn, "0.6.0"},
   {registered, []},
   {applications,
    [kernel,
