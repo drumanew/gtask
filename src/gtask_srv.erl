@@ -76,13 +76,14 @@ handle_exit(From, Reason, State = #{ tab := T }) ->
     Entries = ets:select(T, MatchSpec),
     handle_unexpected(Entries, Reason, State).
 
-handle_report(_Report, State = #{ count := C }) when C == 0 ->
-    %% BUG! report not expected!
-    error_logger:error_msg("report not expected: ~p~n", [_Report]),
+handle_report(Report, State = #{ count := C, name := Name }) when C == 0 ->
+    error_logger:error_msg("group: ~p: BUG: report not expected: ~p~n",
+                           [Name, Report]),
     {ok, State};
 handle_report({Ref, Pid, Result}, State0 = #{ tab := T,
                                               values := V,
-                                              count := C }) ->
+                                              count := C,
+                                              name := Name }) ->
     Entries = ets:lookup(T, Ref),
     case Entries of
         [#entry{ ref = Ref, pid = Pid }] ->
@@ -91,23 +92,23 @@ handle_report({Ref, Pid, Result}, State0 = #{ tab := T,
             {ok, State2} = maybe_reply(State1),
             maybe_pop_queue(State2);
         [] ->
-            %% BUG! no entries for report
-            error_logger:error_msg("no entries for report: ~p~n",
-                                   [{Ref, Pid, Result}]),
+            error_logger:error_msg("group: ~p: BUG: no entry for report: ~p~n",
+                                   [Name, {Ref, Pid, Result}]),
             {ok, State0}
     end.
 
 handle_unexpected([], _Reason, State) ->
     {ok, State};
-handle_unexpected([#entry{}], _Reason, _State) ->
-    %% BUG! dont even want to handle it
-    error_logger:error_msg("dont even want to handle it~n", []),
+handle_unexpected([#entry{}], _Reason, #{ name := Name }) ->
+    error_logger:error_msg("group: ~p: BUG: dont even want to handle it~n",
+                           [Name]),
     exit(kill).
 
-maybe_expired(_Task, #{ expire := Time }, Now, State0 = #{ values := V })
+maybe_expired(Task, #{ expire := Time }, Now, State0 = #{ values := V,
+                                                          name := Name })
     when Now > Time ->
-    error_logger:info_msg("group: ~p: task ~p expired~n",
-                          [maps:get(name, State0), _Task]),
+    error_logger:warning_msg("group: ~p: task ~p expired~n",
+                             [Name, Task]),
     State = State0#{ values => [ expired | V ] },
     maybe_reply(State);
 maybe_expired(Task, Opts, _, State = #{ tab := T, count := Count }) ->
