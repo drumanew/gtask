@@ -27,9 +27,9 @@
 -define(is_timeout(T), ((T == infinity) orelse (is_integer(T) andalso T >= 0))).
 -define(is_group(_), true).
 
--define(DEFAULT_AWAIT_TIMEOUT, 30000).
+-define(DEFAULT_AWAIT_TIMEOUT, 30).
 -define(DEFAULT_MAX_WORKERS,  100).
--define(DEFAULT_TASK_TIMEOUT, 15000).
+-define(DEFAULT_TASK_TIMEOUT, 15).
 
 -define(catchsome(Expr),
         case catch Expr of
@@ -48,9 +48,9 @@ new(Group) ->
     new(Group, default_opts(create)).
 
 new(Group, Opts0) when ?is_group(Group) andalso is_map(Opts0) ->
-    Opts = maps:merge(default_opts(create), Opts0),
-    case check_opts(create, Opts) of
-        true ->
+    Opts1 = maps:merge(default_opts(create), Opts0),
+    case check_opts(create, Opts1) of
+        {ok, Opts} ->
             case gtask_srv:start_link(Group, Opts) of
                 {ok, _Pid} -> ok;
                 {error, _} = Error -> Error
@@ -67,11 +67,11 @@ add(Group, Task) ->
 add(Group, Task, Opts0) when ?is_group(Group) andalso is_map(Opts0) ->
     case check_task(Task) of
         true ->
-            Opts = maps:merge(default_opts(task), Opts0),
-            case check_opts(task, Opts) of
-                true ->
+            Opts1 = maps:merge(default_opts(task), Opts0),
+            case check_opts(task, Opts1) of
+                {ok, Opts} ->
                     ?catchsome(call(Group, {add, Task, Opts}));
-                false ->
+                _ ->
                     {error, badarg}
             end;
         _ ->
@@ -84,7 +84,7 @@ await(Group) ->
     await(Group, ?DEFAULT_AWAIT_TIMEOUT).
 
 await(Group, Timeout) when ?is_group(Group) andalso ?is_timeout(Timeout) ->
-    ?catchsome(call(Group, await, Timeout));
+    ?catchsome(call(Group, await, Timeout*1000));
 await(_, _) ->
     {error, badarg}.
 
@@ -106,10 +106,23 @@ default_opts(create) ->
 default_opts(task) ->
     #{ timeout => ?DEFAULT_TASK_TIMEOUT }.
 
-check_opts(create, #{ max_workers := MaxWorkers }) ->
-    is_integer(MaxWorkers) andalso MaxWorkers > 0;
-check_opts(task, #{ timeout := Timeout }) ->
-    ?is_timeout(Timeout).
+-define(chopts(Cond),
+        case (Cond) of
+            true -> {ok, transform(Type, Opts)};
+            _    -> {error, bad_value}
+        end).
+
+check_opts(Type = create, #{ max_workers := MaxWorkers } = Opts) ->
+    ?chopts(is_integer(MaxWorkers) andalso MaxWorkers > 0);
+check_opts(Type = task, #{ timeout := Timeout } = Opts) ->
+    ?chopts(?is_timeout(Timeout)).
+
+-undef(chopts).
+
+transform(task, Opts = #{ timeout := TSec }) ->
+    Opts#{ timeout => TSec*1000 };
+transform(create, Opts) ->
+    Opts.
 
 check_task({M, F, A}) ->
     is_atom(M) andalso

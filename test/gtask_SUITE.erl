@@ -151,16 +151,16 @@ flow_control(_) ->
 
     %% check queue size
     40 = maps:get(q_len, sys:get_state({via, syn, Group})),
-    timer:sleep(2000),
+    timer:sleep(2100),
 
     30 = maps:get(q_len, sys:get_state({via, syn, Group})),
-    timer:sleep(2000),
+    timer:sleep(2100),
 
     20 = maps:get(q_len, sys:get_state({via, syn, Group})),
-    timer:sleep(2000),
+    timer:sleep(2100),
 
     10 = maps:get(q_len, sys:get_state({via, syn, Group})),
-    timer:sleep(2000),
+    timer:sleep(2100),
 
     {ok, R} = gtask:await(Group),
 
@@ -170,7 +170,7 @@ flow_control(_) ->
     [ ok = gtask:add(Group, fun () -> timer:sleep(2000) end)
       || _ <- lists:seq(1, 20) ],
 
-    {error, timeout} = gtask:await(Group, 2000),
+    {error, timeout} = gtask:await(Group, 2),
 
     ok = gtask:delete(Group),
 
@@ -179,7 +179,7 @@ flow_control(_) ->
 task_timeout(_) ->
     Group = task_timeout_test,
     ok = gtask:new(Group),
-    ok = gtask:add(Group, fun () -> timer:sleep(1000) end, #{ timeout => 500 }),
+    ok = gtask:add(Group, fun () -> timer:sleep(2000) end, #{ timeout => 1 }),
     {ok, [timeout]} = gtask:await(Group),
     ok.
 
