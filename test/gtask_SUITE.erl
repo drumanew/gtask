@@ -125,7 +125,7 @@ flow_control(_) ->
     %% create group
     ok = gtask:new(Group, #{ max_workers => 10 }),
 
-    %% add 100 tasks with 2sec delays
+    %% add 50 tasks with 2sec delays
     [ ok = gtask:add(Group, fun () -> timer:sleep(2000) end) || _ <- lists:seq(1, 50) ],
 
     %% check queue size
@@ -144,6 +144,11 @@ flow_control(_) ->
     {ok, R} = gtask:await(Group),
 
     R = lists:duplicate(50, {done, ok}),
+
+    %% add 20 tasks with 2sec delays
+    [ ok = gtask:add(Group, fun () -> timer:sleep(2000) end) || _ <- lists:seq(1, 20) ],
+
+    {error, timeout} = gtask:await(Group, 2000),
 
     ok = gtask:delete(Group),
 

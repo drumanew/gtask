@@ -5,6 +5,7 @@
          new/2,
          add/2,
          await/1,
+         await/2,
          delete/1]).
 
 -type group()  :: atom().
@@ -19,12 +20,18 @@
 -spec await(group()) -> {ok, result()} | error().
 -spec delete(group()) -> ok | error().
 
--define(noproc(Expr), case catch Expr of
-                          ok -> ok;
-                          {ok, _} = __Rep -> __Rep;
-                          {'EXIT', noproc} -> {error, not_started};
-                          {'EXIT', {noproc, _}} -> {error, not_started}
-                      end).
+-define(is_timeout(T), ((T == infinity) orelse (is_integer(T) andalso T >= 0))).
+
+-define(DEFAULT_TIMEOUT, 30000).
+
+-define(catchsome(Expr),
+        case catch Expr of
+             ok -> ok;
+            {ok, _} = __Rep -> __Rep;
+            {'EXIT', noproc} -> {error, not_started};
+            {'EXIT', {timeout, _}} -> {error, timeout};
+            {'EXIT', {noproc, _}} -> {error, not_started}
+        end).
 
 %%====================================================================
 %% API functions
@@ -50,22 +57,25 @@ new(_, _) ->
 add(Group, Task = {M, F, A}) when is_atom(Group) ->
     case check_mfa(M, F, A) of
         true ->
-            ?noproc(gen_server:call(Group, {add, Task}));
+            ?catchsome(gen_server:call(Group, {add, Task}));
         false ->
             {error, badarg}
     end;
 add(Group, Task) when is_atom(Group) andalso is_function(Task, 0) ->
-    ?noproc(gen_server:call(Group, {add, Task}));
+    ?catchsome(gen_server:call(Group, {add, Task}));
 add(_, _) ->
     {error, badarg}.
 
-await(Group) when is_atom(Group) ->
-    ?noproc(gen_server:call(Group, await, 30000));
-await(_) ->
+await(Group) ->
+    await(Group, ?DEFAULT_TIMEOUT).
+
+await(Group, Timeout) when is_atom(Group) andalso ?is_timeout(Timeout) ->
+    ?catchsome(gen_server:call(Group, await, Timeout));
+await(_, _) ->
     {error, badarg}.
 
 delete(Group) when is_atom(Group) ->
-    ?noproc(gen_server:stop(Group));
+    ?catchsome(gen_server:stop(Group));
 delete(_) ->
     {error, badarg}.
 
