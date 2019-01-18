@@ -11,10 +11,12 @@
 
 -record (entry, {ref, pid}).
 
+-include_lib("stdlib/include/ms_transform.hrl").
+
 %% API
 
 start_link(Name, Opts) ->
-    gen_server:start_link({local, Name}, ?MODULE, Opts, []).
+    gen_server:start_link({via, syn, Name}, ?MODULE, Opts, []).
 
 %% gen_server callbacks
 

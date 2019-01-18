@@ -9,7 +9,7 @@
          await/2,
          delete/1]).
 
--type group()       :: atom().
+-type group()       :: any().
 -type create_opts() :: #{ max_workers := pos_integer() }.
 -type task()        :: fun(() -> any()) | {module(), fun(), list(any())}.
 -type task_opts()   :: #{ timeout := timeout() }.
@@ -25,6 +25,7 @@
 -spec delete(group()) -> ok | error().
 
 -define(is_timeout(T), ((T == infinity) orelse (is_integer(T) andalso T >= 0))).
+-define(is_group(_), true).
 
 -define(DEFAULT_AWAIT_TIMEOUT, 30000).
 -define(DEFAULT_MAX_WORKERS,  100).
@@ -46,7 +47,7 @@
 new(Group) ->
     new(Group, default_opts(create)).
 
-new(Group, Opts0) when is_atom(Group) andalso is_map(Opts0) ->
+new(Group, Opts0) when ?is_group(Group) andalso is_map(Opts0) ->
     Opts = maps:merge(default_opts(create), Opts0),
     case check_opts(create, Opts) of
         true ->
@@ -63,13 +64,13 @@ new(_, _) ->
 add(Group, Task) ->
     add(Group, Task, default_opts(task)).
 
-add(Group, Task, Opts0) when is_atom(Group) andalso is_map(Opts0) ->
+add(Group, Task, Opts0) when ?is_group(Group) andalso is_map(Opts0) ->
     case check_task(Task) of
         true ->
             Opts = maps:merge(default_opts(task), Opts0),
             case check_opts(task, Opts) of
                 true ->
-                    ?catchsome(gen_server:call(Group, {add, Task, Opts}));
+                    ?catchsome(call(Group, {add, Task, Opts}));
                 false ->
                     {error, badarg}
             end;
@@ -82,19 +83,23 @@ add(_, _, _) ->
 await(Group) ->
     await(Group, ?DEFAULT_AWAIT_TIMEOUT).
 
-await(Group, Timeout) when is_atom(Group) andalso ?is_timeout(Timeout) ->
-    ?catchsome(gen_server:call(Group, await, Timeout));
+await(Group, Timeout) when ?is_group(Group) andalso ?is_timeout(Timeout) ->
+    ?catchsome(call(Group, await, Timeout));
 await(_, _) ->
     {error, badarg}.
 
-delete(Group) when is_atom(Group) ->
-    ?catchsome(gen_server:stop(Group));
-delete(_) ->
-    {error, badarg}.
+delete(Group) when ?is_group(Group) ->
+    ?catchsome(gen_server:stop({via, syn, Group})).
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+call(Group, Req) ->
+    call(Group, Req, 5000).
+
+call(Group, Req, Timeout) ->
+    gen_server:call({via, syn, Group}, Req, Timeout).
 
 default_opts(create) ->
     #{ max_workers => ?DEFAULT_MAX_WORKERS };
@@ -104,9 +109,7 @@ default_opts(task) ->
 check_opts(create, #{ max_workers := MaxWorkers }) ->
     is_integer(MaxWorkers) andalso MaxWorkers > 0;
 check_opts(task, #{ timeout := Timeout }) ->
-    ?is_timeout(Timeout);
-check_opts(_, _) ->
-    false.
+    ?is_timeout(Timeout).
 
 check_task({M, F, A}) ->
     is_atom(M) andalso

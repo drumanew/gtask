@@ -1,6 +1,9 @@
 -module (gtask_SUITE).
 
--export ([all/0]).
+-export ([all/0,
+          init_per_testcase/2,
+          end_per_testcase/2]).
+
 -export ([ mod_exists/1
          , simple/1
          , flow_control/1
@@ -13,6 +16,15 @@ all() ->
     , flow_control
     , task_timeout
     ].
+
+init_per_testcase(_Test, Config) ->
+    {ok, Apps} = application:ensure_all_started(gtask),
+    syn:init(),
+    [{apps, Apps} | Config].
+
+end_per_testcase(_Test, Config) ->
+    Apps = proplists:get_value(apps, Config, []),
+    [ ok = application:stop(App) || App <- Apps ].
 
 mod_exists(_) ->
     {module, gtask} = code:load_file(gtask).
@@ -138,16 +150,16 @@ flow_control(_) ->
       || _ <- lists:seq(1, 50) ],
 
     %% check queue size
-    40 = maps:get(q_len, sys:get_state(Group)),
+    40 = maps:get(q_len, sys:get_state({via, syn, Group})),
     timer:sleep(2000),
 
-    30 = maps:get(q_len, sys:get_state(Group)),
+    30 = maps:get(q_len, sys:get_state({via, syn, Group})),
     timer:sleep(2000),
 
-    20 = maps:get(q_len, sys:get_state(Group)),
+    20 = maps:get(q_len, sys:get_state({via, syn, Group})),
     timer:sleep(2000),
 
-    10 = maps:get(q_len, sys:get_state(Group)),
+    10 = maps:get(q_len, sys:get_state({via, syn, Group})),
     timer:sleep(2000),
 
     {ok, R} = gtask:await(Group),
